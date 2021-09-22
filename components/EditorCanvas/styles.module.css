@@ -1,0 +1,20 @@
+.canvas {
+    border: 1px solid black;
+}
+
+.canvasContainer {
+    
+}
+
+
+.object {
+    border: 1px solid blue;
+    position: relative;
+    width: 100%;
+}
+
+.textbox {
+    border: 1px solid blue;
+    position: relative;
+    width: 100%;
+}
