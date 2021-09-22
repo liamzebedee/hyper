@@ -1,12 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 // const { Stage, Layer, Star, Text } = require('react-konva');
 import("konva")
 // const { Stage, Layer, Star, Text } = import('react-konva');
-const { Layer, Star, Text } = require('react-konva');
+const { Layer, Star, Text, Image, Rect } = require('react-konva');
 import { Stage } from './Stage'
-console.log(Konva)
+import useImage from 'use-image'
+const IMAGE_URI_SVG = "https://storage.opensea.io/files/7027a367a2d7923c6b86845d4be3a143.svg"
+const IMAGE_URI = "https://upload.wikimedia.org/wikipedia/en/c/cc/Wojak_cropped.jpg"
 
+
+function downloadURI(uri, name) {
+    var link = document.createElement('a');
+    link.download = name;
+    link.href = uri;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
 
 const Editor = () => {
     const [stars, setStars] = useState(generateShapes());
@@ -45,10 +56,36 @@ const Editor = () => {
     };
     
 
+    const [image] = useImage(IMAGE_URI, 'anonymous');
+    
+    const stageRef = useRef()
+
+    function exportCanvas() {
+        const uri = stageRef.current.toDataURL();
+        console.log(uri);
+
+        downloadURI(uri, 'meme.jpg')
+        // we also can save uri as file
+        // but in the demo on Konva website it will not work
+        // because of iframe restrictions
+        // but feel free to use it in your apps:
+        // downloadURI(uri, 'stage.png');
+    }
+
     return <div>
-        <Stage width={700} height={700}>
+        <button onClick={exportCanvas}>Export</button>
+        <Stage ref={stageRef} width={700} height={700}>
             <Layer>
+                <Rect x={0} y={0} width={700} height={700} fill="white">
+                </Rect>
+
                 <Text text="Try to drag a star" />
+
+                <Image 
+                    crossOrigin
+                    image={image} 
+                    draggable />
+                
                 {stars.map((star) => (
                     <Star
                         key={star.id}
@@ -73,6 +110,7 @@ const Editor = () => {
                         onDragEnd={handleDragEnd}
                     />
                 ))}
+
             </Layer>
         </Stage>
     </div>
