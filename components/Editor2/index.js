@@ -1,11 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { createRef, useEffect, useReducer, useRef, useState } from 'react';
 
 // const { Stage, Layer, Star, Text } = require('react-konva');
 import("konva")
 // const { Stage, Layer, Star, Text } = import('react-konva');
-const { Layer, Star, Text, Image, Rect } = require('react-konva');
+const { Layer, Star, Text, Image, Rect, Transformer } = require('react-konva');
 import { Stage } from './Stage'
 import useImage from 'use-image'
+import { makeObservable, observable, action, computed } from "mobx"
+import { observer } from 'mobx-react-lite'
+import styles from './styles.module.css'
+import cuid from 'cuid';
+import _, { create } from 'lodash'
+
 const IMAGE_URI_SVG = "https://storage.opensea.io/files/7027a367a2d7923c6b86845d4be3a143.svg"
 const IMAGE_URI = "https://upload.wikimedia.org/wikipedia/en/c/cc/Wojak_cropped.jpg"
 
@@ -19,8 +25,98 @@ function downloadURI(uri, name) {
     document.body.removeChild(link);
 }
 
-const Editor = () => {
+let images = {}
+async function getImageElement(url, crossOrigin) {
+    if (!url) return;
+
+    var img = document.createElement('img');
+
+    return new Promise((resolve, reject) => {
+        function onload() {
+            resolve(img)
+        }
+
+        function onerror(err) {
+            reject(err)
+        }
+
+        img.addEventListener('load', onload);
+        img.addEventListener('error', onerror);
+        if (crossOrigin) {
+            img.crossOrigin = crossOrigin
+        }
+        img.src = url;
+
+        // return function cleanup() {
+        //     img.removeEventListener('load', onload);
+        //     img.removeEventListener('error', onerror);
+        //     setState(defaultState);
+        // };
+    })
+}
+
+class EditorState {
+    objects = []
+    selected = []
+
+    constructor(title) {
+        makeObservable(this, {
+            objects: observable,
+            initialize: action,
+            selected: observable,
+            select: action
+        })
+    }
+
+    async initialize({ objects }) {
+        this.objects = (await Promise.all(objects.map((obj) => {
+            if(obj.type == 'image') {
+                return this.loadImageObject(obj)
+            }
+            return obj
+        }))).map((obj, i) => {
+            obj.id = cuid()
+            return obj
+        })
+    }
+
+    async loadImageObject(obj) {
+        const img = await getImageElement(obj.url, true)
+        return {
+            ...obj,
+            img
+        }
+    }
+
+    select(objects) {
+        this.selected = objects
+    }
+
+    loadImage() {
+        // this.finished = !this.finished
+        
+    }
+};
+
+let refs = {}
+
+const Editor = observer(() => {
+    const [editorState] = useState(() => new EditorState())
+
+    useEffect(() => {
+        editorState.initialize({
+            objects: [
+                {
+                    type: 'image',
+                    url: 'https://upload.wikimedia.org/wikipedia/en/c/cc/Wojak_cropped.jpg'
+                }
+            ]
+        })
+    }, [])
+
     const [stars, setStars] = useState(generateShapes());
+
+
     
     function generateShapes() {
         return [...Array(10)].map((_, i) => ({
@@ -62,7 +158,7 @@ const Editor = () => {
 
     function exportCanvas() {
         const uri = stageRef.current.toDataURL();
-        console.log(uri);
+        console.log('exportCanvas', uri);
 
         downloadURI(uri, 'meme.jpg')
         // we also can save uri as file
@@ -70,50 +166,116 @@ const Editor = () => {
         // because of iframe restrictions
         // but feel free to use it in your apps:
         // downloadURI(uri, 'stage.png');
+    }   
+
+    function handleDragEnter(ev) {
+        // console.log(ev)
     }
+
+    // const refs = editorState.objects.map(({ id }) => {
+    //     return { [id]: createRef() }
+    // }).reduce((acc,curr) => Object.assign(acc, curr), {})
+
+    console.log('refs', refs)
+
+    const objects = editorState.objects.map((object) => {
+        if (object.type === 'image') {
+            const { img } = object
+
+            let ref = _.get(refs, object.id)
+            if(!ref) {
+                ref = createRef()
+                refs[object.id] = ref
+            }
+
+
+            return <Image
+                key={object.id}
+                ref={ref}
+                crossOrigin
+                image={img}
+                draggable
+                onClick={(ev) => {
+                    console.log('select', object.id)
+                    editorState.select([object.id])
+                    ev.cancelBubble = true
+                }} />
+        }
+    })
+
+    console.log('selected', editorState.selected)
+
+    const transformerRef = useRef()
+
+    useEffect(() => {
+        const selected = editorState.selected.map(id => refs[id])
+        console.log(`updateTransformer`, selected)
+
+        transformerRef.current.nodes(selected.map(ref => ref.current));
+        transformerRef.current.getLayer().batchDraw();
+        
+    })
+
 
     return <div>
         <button onClick={exportCanvas}>Export</button>
-        <Stage ref={stageRef} width={700} height={700}>
-            <Layer>
-                <Rect x={0} y={0} width={700} height={700} fill="white">
-                </Rect>
+        <button onClick={() => {
+            editorState.select([])
+        }}>Cancel</button>
 
-                <Text text="Try to drag a star" />
+        <div className={styles.canvas}>
+            <Stage ref={stageRef} width={700} height={700} onDragEnter={handleDragEnter} >
+                <Layer onClick={() => {
+                    editorState.select([])
+                }}>
+                    <Rect x={0} y={0} width={700} height={700} fill="white">
+                    </Rect>
 
-                <Image 
-                    crossOrigin
-                    image={image} 
-                    draggable />
-                
-                {stars.map((star) => (
-                    <Star
-                        key={star.id}
-                        id={star.id}
-                        x={star.x}
-                        y={star.y}
-                        numPoints={5}
-                        innerRadius={20}
-                        outerRadius={40}
-                        fill="#89b717"
-                        opacity={0.8}
-                        draggable
-                        rotation={star.rotation}
-                        shadowColor="black"
-                        shadowBlur={10}
-                        shadowOpacity={0.6}
-                        shadowOffsetX={star.isDragging ? 10 : 5}
-                        shadowOffsetY={star.isDragging ? 10 : 5}
-                        scaleX={star.isDragging ? 1.2 : 1}
-                        scaleY={star.isDragging ? 1.2 : 1}
-                        onDragStart={handleDragStart}
-                        onDragEnd={handleDragEnd}
+                    <Transformer
+                        ref={transformerRef}
+                        boundBoxFunc={(oldBox, newBox) => {
+                            // limit resize
+                            if (newBox.width < 5 || newBox.height < 5) {
+                                return oldBox;
+                            }
+                            return newBox;
+                        }}
                     />
-                ))}
+                    
+                    <Rect fill="rgba(0,0,255,0.5)" visible={1}/>
+                    
+                    {objects}
+                    
+                    {stars.map((star) => (
+                        <Star
+                            key={star.id}
+                            id={star.id}
+                            x={star.x}
+                            y={star.y}
+                            numPoints={5}
+                            innerRadius={20}
+                            outerRadius={40}
+                            fill="#89b717"
+                            opacity={0.8}
+                            draggable
+                            rotation={star.rotation}
+                            shadowColor="black"
+                            shadowBlur={10}
+                            shadowOpacity={0.6}
+                            shadowOffsetX={star.isDragging ? 10 : 5}
+                            shadowOffsetY={star.isDragging ? 10 : 5}
+                            scaleX={star.isDragging ? 1.2 : 1}
+                            scaleY={star.isDragging ? 1.2 : 1}
+                            onDragStart={handleDragStart}
+                            onDragEnd={handleDragEnd}
+                        />
+                    ))}
 
-            </Layer>
-        </Stage>
+                </Layer>
+            </Stage>
+        </div>
     </div>
-};
+})
+
 
 export default Editor
