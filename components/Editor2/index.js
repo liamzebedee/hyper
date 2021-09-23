@@ -46,7 +46,7 @@ async function getImageElement(url, crossOrigin) {
             img.crossOrigin = crossOrigin
         }
         img.src = url;
-
+        console.log(img)
         // return function cleanup() {
         //     img.removeEventListener('load', onload);
         //     img.removeEventListener('error', onerror);
@@ -59,25 +59,31 @@ class EditorState {
     objects = []
     selected = []
 
+    dragActive = false
+
     constructor(title) {
         makeObservable(this, {
             objects: observable,
             initialize: action,
             selected: observable,
-            select: action
+            select: action,
+            dragActive: observable,
+            setDragActive: action,
+            addObject: action
         })
     }
 
     async initialize({ objects }) {
-        this.objects = (await Promise.all(objects.map((obj) => {
-            if(obj.type == 'image') {
-                return this.loadImageObject(obj)
-            }
-            return obj
-        }))).map((obj, i) => {
-            obj.id = cuid()
-            return obj
-        })
+        this.objects = await Promise.all(objects.map(obj => this.loadObject(obj)))
+    }
+
+    async loadObject(obj) {
+        let editorObject
+        if (obj.type == 'image') {
+            editorObject = await this.loadImageObject(obj)
+        }
+        editorObject.id = cuid()
+        return editorObject
     }
 
     async loadImageObject(obj) {
@@ -92,9 +98,13 @@ class EditorState {
         this.selected = objects
     }
 
-    loadImage() {
-        // this.finished = !this.finished
-        
+    setDragActive(v) {
+        this.dragActive = v
+    }
+
+    async addObject(obj) {
+        let editorObject = await this.loadObject(obj)
+        this.objects.push(editorObject)
     }
 };
 
@@ -168,10 +178,6 @@ const Editor = observer(() => {
         // downloadURI(uri, 'stage.png');
     }   
 
-    function handleDragEnter(ev) {
-        // console.log(ev)
-    }
-
     // const refs = editorState.objects.map(({ id }) => {
     //     return { [id]: createRef() }
     // }).reduce((acc,curr) => Object.assign(acc, curr), {})
@@ -187,7 +193,6 @@ const Editor = observer(() => {
                 ref = createRef()
                 refs[object.id] = ref
             }
-
 
             return <Image
                 key={object.id}
@@ -213,18 +218,69 @@ const Editor = observer(() => {
 
         transformerRef.current.nodes(selected.map(ref => ref.current));
         transformerRef.current.getLayer().batchDraw();
-        
     })
+    console.log(editorState.dragActive)
 
+    return <div 
+        onDrop={(ev) => {
+            ev.preventDefault()
+        }}
+        onDragOver={(ev) => {
+            // Prevent default browser behaviour.
+            ev.preventDefault()
+        }}>
 
-    return <div>
+        <h3>hyper editor</h3>
         <button onClick={exportCanvas}>Export</button>
-        <button onClick={() => {
-            editorState.select([])
-        }}>Cancel</button>
 
-        <div className={styles.canvas}>
-            <Stage ref={stageRef} width={700} height={700} onDragEnter={handleDragEnter} >
+        <div className={styles.canvas}
+            onDragEnter={(ev) => {
+                ev.preventDefault()
+                editorState.setDragActive(true)
+            }}
+            onDragLeave={(ev) => {
+                editorState.setDragActive(false)
+                ev.preventDefault()
+            }}
+            onDragOver={(ev) => {
+                // Prevent default browser behaviour.
+                editorState.setDragActive(true)
+                ev.preventDefault()
+            }}
+            onDrop={(ev) => {
+                ev.preventDefault()
+                editorState.setDragActive(false)
+
+                // now we need to find pointer position
+                // we can't use stage.getPointerPosition() here, because that event
+                // is not registered by Konva.Stage
+                // we can register it manually:
+                stageRef.current.setPointersPositions(ev);
+                console.log(ev.dataTransfer)
+                for (let item of ev.dataTransfer.items) {
+                    if (item.type == 'image/png' || item.type == 'image/jpeg') {
+                        const reader = new FileReader();
+                        reader.addEventListener('load', () => {
+                            console.log(reader.result)
+                            editorState.addObject({
+                                type: 'image',
+                                url: reader.result,
+                                position: stageRef.current.getPointerPosition()
+                            })
+                        }, false)
+                        reader.readAsDataURL(item.getAsFile())
+                    }
+                }
+
+            }}
+            onDragEnd={(ev) => {
+                ev.preventDefault()
+                editorState.setDragActive(false)
+            }}
+            style={{
+                border: `2px solid ${editorState.dragActive == true ? 'blue' : 'black'}`
+            }}>
+            <Stage ref={stageRef} width={700} height={700}>
                 <Layer onClick={() => {
                     editorState.select([])
                 }}>
@@ -246,7 +302,7 @@ const Editor = observer(() => {
                     
                     {objects}
                     
-                    {stars.map((star) => (
+                    {/* {stars.map((star) => (
                         <Star
                             key={star.id}
                             id={star.id}
@@ -269,7 +325,7 @@ const Editor = observer(() => {
                             onDragStart={handleDragStart}
                             onDragEnd={handleDragEnd}
                         />
-                    ))}
+                    ))} */}
 
                 </Layer>
             </Stage>
