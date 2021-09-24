@@ -13,7 +13,8 @@ import cuid from 'cuid';
 import _, { create } from 'lodash'
 const { concat: uint8ArrayConcat } = require('uint8arrays/concat')
 const all = require('it-all')
-// import * as IPFS from 'ipfs-core'
+const dataUriToBuffer = require('data-uri-to-buffer');
+
 const IPFSHttp = require('ipfs-http-client')
 const IPFS_NODE_URI = 'http://0.0.0.0:5001/'
 const IPFS_GATEWAY_BASE_URI = 'http://0.0.0.0:8080/ipfs/'
@@ -36,7 +37,7 @@ async function getImageElement(url, crossOrigin) {
 
     var img = document.createElement('img');
 
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
         function onload() {
             resolve(img)
         }
@@ -50,7 +51,18 @@ async function getImageElement(url, crossOrigin) {
         if (crossOrigin) {
             img.crossOrigin = crossOrigin
         }
-        img.src = url;
+
+        const urlObj = new URL(url)
+
+        if (urlObj.protocol === 'ipfs:') {
+            const cid = urlObj.hostname
+            console.log(cid)
+            const buf = await loadIpfsFile(cid, 'binary')
+            img.src = `${IPFS_GATEWAY_BASE_URI}${cid}`
+            img['data-ipfs'] = url
+        } else {
+            img.src = url;
+        }
         console.log(img)
         // return function cleanup() {
         //     img.removeEventListener('load', onload);
@@ -119,16 +131,39 @@ class EditorState {
 };
 
 let refs = {}
+const CID = require('cids')
 
+function normaliseCID(cid) {
+    return cid.asCID.toV1().toString()
+}
+
+async function loadIpfsFile(cid, format='json') {
+    const convertedCID = (new CID(cid)).toV1().toString('base32')
+
+    const ipfs = await IPFSHttp.create(IPFS_NODE_URI)
+    const data = uint8ArrayConcat(await all(ipfs.cat(convertedCID)))
+    let content
+    if (format == 'json') {
+        content = JSON.parse(new TextDecoder().decode(data))
+    } else if(format == 'binary') {
+        content = data
+    }
+    return content
+}
 
 const Editor = observer(() => {
     const [editorState] = useState(() => new EditorState())
 
     useEffect(async () => {
-        const ipfs = await IPFSHttp.create(IPFS_NODE_URI)
-        const cid = 'QmVF3t1mJLGSY8UdVVtDx112gU4sp1yNAxwUmACaD1Mpes'
-        const data = uint8ArrayConcat(await all(ipfs.cat(cid)))
-        const content = JSON.parse(new TextDecoder().decode(data))
+        const urlParams = new URLSearchParams(window.location.search);
+        const cid = urlParams.get('cid');
+        
+        let content = {
+            objects: []
+        }
+        if(cid) {
+            content = await loadIpfsFile(cid, 'json')
+        }
 
         console.log(content)
 
@@ -145,21 +180,6 @@ const Editor = observer(() => {
         //     ]
         // })
     }, [])
-
-    const [stars, setStars] = useState(generateShapes());
-
-
-    
-    function generateShapes() {
-        return [...Array(10)].map((_, i) => ({
-            id: i.toString(),
-            x: Math.random() * 400,
-            y: Math.random() * 700,
-            rotation: Math.random() * 180,
-            isDragging: false,
-        }));
-    }
-
 
     const handleDragStart = (e) => {
         const id = e.target.id();
@@ -207,16 +227,14 @@ const Editor = observer(() => {
         const allChildren = layer.getChildren()
 
         const acceptedTypes = ['Image', 'Rect']
-        
-        function convertImage(child) {
-
-        }
 
         const children = allChildren
             .filter(child => acceptedTypes.includes(child.className));
-        
+
+        const ipfs = await IPFSHttp.create(IPFS_NODE_URI)
+
         // Now convert each node.
-        const objects = children.map(node => {
+        const objects = await Promise.all(children.map(async node => {
             let obj = {
                 type: null
             }
@@ -225,13 +243,37 @@ const Editor = observer(() => {
 
             // Determine obj.type.
             if(node.className == 'Image') {
-                const type = 'image'
-                const url = node.attrs.image.src
+                let image = {
+                    type: 'image',
+                    url: null,
+                }
+                const $image = node.attrs.image
+                console.log($image)
+                if ($image["data-ipfs"]) {
+                    // If the content is originating from IPFS, we don't re-upload it.
+                    // This is a bit of a hack, as we assume that the <img> element will have the 
+                    // data-ipfs property, set above.
+                    image.url = $image["data-ipfs"]
+                } else if ($image.src.startsWith('data')) {
+                    // extract image type
+                    // const urlObj = new URL(url)
+                    // new URL("data:image/jpeg;base64,/9j/4AAQSk")
+                    // pathname: "image/jpeg;base64,/9j/4AAQSk",
+                    // image.imageType = urlObj.pathname.split(';')[0]
+                    
+
+                    // upload to ipfs
+                    const buf = dataUriToBuffer($image.src)
+                    const { cid } = await ipfs.add(buf)
+                    console.log(cid)
+                    const ipfsUri = `ipfs://${normaliseCID(cid)}`
+                    console.log(`uploaded submedia ${ipfsUri}`)
+                    image.url = ipfsUri
+                }
 
                 obj = {
                     ...data,
-                    type,
-                    url
+                    ...image
                 }
 
                 delete obj.attrs.image
@@ -246,19 +288,18 @@ const Editor = observer(() => {
             }
 
             return obj
-        })
+        }))
 
         const file = {
             version: '0.0.1',
             objects
         }
 
-
-        const ipfs = await IPFSHttp.create(IPFS_NODE_URI)
         const { cid } = await ipfs.add(JSON.stringify(file))
 
         console.log('exportCanvasAsHyper', children, objects);
-        console.log(`${IPFS_GATEWAY_BASE_URI}${cid.toString()}`)
+        console.log(`${IPFS_GATEWAY_BASE_URI}${normaliseCID(cid)}`)
+        window.open(`http://localhost:3001?cid=${normaliseCID(cid)}`)
     }
 
 
@@ -291,6 +332,11 @@ const Editor = observer(() => {
                 }} 
                 {...object.attrs}
                 />
+        } else if(object.type == 'Rect') {
+            return <Rect
+                key={object.id}
+                draggable
+                {...object.attrs} />
         }
     })
 
@@ -386,31 +432,6 @@ const Editor = observer(() => {
                             return newBox;
                         }}
                     />
-
-                    {/* {stars.map((star) => (
-                        <Star
-                            key={star.id}
-                            id={star.id}
-                            x={star.x}
-                            y={star.y}
-                            numPoints={5}
-                            innerRadius={20}
-                            outerRadius={40}
-                            fill="#89b717"
-                            opacity={0.8}
-                            draggable
-                            rotation={star.rotation}
-                            shadowColor="black"
-                            shadowBlur={10}
-                            shadowOpacity={0.6}
-                            shadowOffsetX={star.isDragging ? 10 : 5}
-                            shadowOffsetY={star.isDragging ? 10 : 5}
-                            scaleX={star.isDragging ? 1.2 : 1}
-                            scaleY={star.isDragging ? 1.2 : 1}
-                            onDragStart={handleDragStart}
-                            onDragEnd={handleDragEnd}
-                        />
-                    ))} */}
 
                 </Layer>
             </Stage>

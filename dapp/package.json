@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "canvas": "^2.8.0",
+    "cids": "^1.1.9",
     "clsx": "^1.1.1",
     "cuid": "^2.1.8",
+    "data-uri-to-buffer": "^3.0.1",
     "ipfs-core": "^0.10.8",
     "ipfs-http-client": "^52.0.5",
     "it-all": "^1.0.5",
