@@ -163,3 +163,5 @@ export const StageWrap = (props) => {
 export const Stage = forwardRef((props, ref) => {
     return <StageWrap {...props} forwardedRef={ref} />;
 });
+
+Stage.displayName = 'Stage';
