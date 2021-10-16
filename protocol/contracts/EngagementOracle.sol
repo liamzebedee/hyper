@@ -12,10 +12,10 @@ contract EngagementOracle {
     mapping(uint256 => Engagement) _engagement;
 
     function engagement(uint256 itemId) public view returns (uint) {
-        return 0;
+        return _engagement[itemId].value;
     }
 
-    function setEngagement(uint256 itemId, uint amount) public view returns (uint) {
+    function setEngagement(uint256 itemId, uint amount) public returns (uint) {
         Engagement storage engagement = _engagement[itemId] ;
         engagement.value = amount;
         engagement.lastUpdated = block.timestamp;
