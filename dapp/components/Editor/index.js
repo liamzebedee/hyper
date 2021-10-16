@@ -257,8 +257,21 @@ const Editor = observer(() => {
                 draggable
                 {...object.attrs} />
         } else if (object.type == 'Text') {
+
+            let ref = _.get(refs, object.id)
+            if (!ref) {
+                ref = createRef()
+                refs[object.id] = ref
+            }
+
             return <EditableText
                 key={object.id}
+                ref={ref}
+                onClick={(ev) => {
+                    console.log('select', object.id)
+                    editorState.select([object.id])
+                    ev.cancelBubble = true
+                }}
                 draggable
                 stageRef={stageRef}
                 transformerRef={transformerRef}

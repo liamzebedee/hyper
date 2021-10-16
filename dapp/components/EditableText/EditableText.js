@@ -1,8 +1,8 @@
 import _ from "lodash"
-import { createRef } from "react"
+import { createRef, forwardRef } from "react"
 import { Text } from "react-konva"
 
-const EditableText = (props) => {
+const EditableText = forwardRef((props, ref) => {
     const { stageRef, transformerRef } = props
     console.log(props)
     // Hide text node.
@@ -13,7 +13,12 @@ const EditableText = (props) => {
     // Style textarea.
     // Handle text input.
 
-    const ref = createRef()
+    function handleSingleClick() {
+        const textNode = ref.current
+        const tr = transformerRef.current
+
+        tr.select([tr])
+    }
 
     function handleEdit() {
         const textNode = ref.current
@@ -22,7 +27,15 @@ const EditableText = (props) => {
 
         // hide text node and transformer:
         textNode.hide();
-        tr.hide();
+        // tr.hide();
+
+        textNode.on('transform', function () {
+            // reset scale, so only with is changing by transformer
+            textNode.setAttrs({
+                width: textNode.width() * textNode.scaleX(),
+                scaleX: 1,
+            });
+        });
 
         // create textarea over canvas with absolute position
         // first we need to find position for textarea
@@ -145,7 +158,8 @@ const EditableText = (props) => {
             textNode.text(textarea.value);
             removeTextarea();
             if (e.target !== textarea) {
-
+                textNode.text(textarea.value);
+                removeTextarea();
             }
         }
         textarea.addEventListener('blur', handleOutsideClick)
@@ -155,9 +169,10 @@ const EditableText = (props) => {
         <Text
             ref={ref}
             draggable
+            // onClick={onClick}
             onDblClick={handleEdit}
             {..._.omit(props, ['stageRef', 'transformerRef'])} />
     </>
-}
+})
 
 export default EditableText
