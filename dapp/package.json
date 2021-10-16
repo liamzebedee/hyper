@@ -9,14 +9,17 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ensdomains/ensjs": "^2.0.1",
     "canvas": "^2.8.0",
     "cids": "^1.1.9",
     "clsx": "^1.1.1",
     "cuid": "^2.1.8",
     "data-uri-to-buffer": "^3.0.1",
+    "ethers": "^5.4.7",
     "ipfs-core": "^0.10.8",
     "ipfs-http-client": "^52.0.5",
     "it-all": "^1.0.5",
+    "lodash": "^4.17.21",
     "mobx": "^6.3.3",
     "mobx-react": "^7.2.0",
     "next": "11.1.2",
@@ -27,7 +30,8 @@
     "react-use": "^17.3.1",
     "text-encoding": "^0.7.0",
     "uint8arrays": "^3.0.0",
-    "use-image": "^1.0.8"
+    "use-image": "^1.0.8",
+    "web3modal": "^1.9.4"
   },
   "devDependencies": {
     "eslint": "7.32.0",

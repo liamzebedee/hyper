@@ -1,16 +1,27 @@
 import React, { createRef, useEffect, useReducer, useRef, useState } from 'react';
 const { Layer, Star, Text, Image, Rect, Transformer } = require('react-konva');
-import { Stage } from './Stage'
 import { makeObservable, observable, action, computed } from "mobx"
 import { observer } from 'mobx-react-lite'
-import styles from './styles.module.css'
 import cuid from 'cuid';
 import _, { create } from 'lodash'
-import EditableText from '../EditableText/EditableText'
 const dataUriToBuffer = require('data-uri-to-buffer');
+const ethers = require('ethers')
+import ENS, { getEnsAddress } from '@ensdomains/ensjs'
 
 import { downloadURI, normaliseCID, downloadFromIpfs, uploadToIpfs } from '../../helpers'
 import { IPFS_GATEWAY_BASE_URI, IPFS_NODE_URI } from '../../config';
+import { Stage } from './Stage'
+import EditableText from '../EditableText/EditableText'
+import styles from './styles.module.css'
+
+const web3Modal = new Web3Modal({
+    // network: "mainnet", // optional
+    cacheProvider: true, // optional
+    providerOptions: {} // required
+});
+
+let provider
+let ens
 
 let images = {}
 async function getImageElement(url, crossOrigin) {
@@ -117,11 +128,38 @@ class EditorState {
     }
 };
 
+class Web3State {
+    provider = null
+    ensName = null
+
+    constructor(title) {
+        makeObservable(this, {
+            provider: observable,
+            ensName: observable,
+            set: action
+        })
+    }
+
+    set(provider, ensName) {
+        this.provider = provider
+        this.ensName = ensName
+    }
+};
+
 let refs = {}
+
+
+
+import Web3Modal from "web3modal";
+const providerOptions = {};
+
+
 
 
 const Editor = observer(() => {
     const [editorState] = useState(() => new EditorState())
+    const [web3State] = useState(() => new Web3State())
+
 
     useEffect(async () => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -315,6 +353,24 @@ const Editor = observer(() => {
         transformerRef.current.getLayer().batchDraw();
     }, [editorState.selected])
 
+    async function connectWallet() {
+        const rawProvider = await web3Modal.connect();
+        provider = new ethers.providers.Web3Provider(rawProvider)
+        const signer = await provider.getSigner()
+        const addy = await signer.getAddress()
+        
+
+        const ens = new ENS({ provider, ensAddress: getEnsAddress('1') })
+        let { name: ensName } = await ens.getName(addy)
+        console.log(addy, ensName)
+
+        if (addy != (await ens.name(ensName).getAddress())) {
+            ensName = addy
+        }
+
+        web3State.set(provider, ensName)
+    }
+
     return <div 
         onDrop={(ev) => {
             ev.preventDefault()
@@ -325,6 +381,13 @@ const Editor = observer(() => {
         }}>
 
         <h3>HYPER FABRICATOR</h3>
+        <p>
+        {
+            web3State.provider 
+            ? web3State.ensName
+            : <button onClick={connectWallet}>Connect wallet</button>
+        }
+        </p>
 
         <button onClick={() => {
             editorState.addObject({
