@@ -68,7 +68,8 @@ class EditorState {
             select: action,
             dragActive: observable,
             setDragActive: action,
-            addObject: action
+            addObject: action,
+            delete: action
         })
     }
 
@@ -103,6 +104,11 @@ class EditorState {
 
     setDragActive(v) {
         this.dragActive = v
+    }
+    
+    delete(objectIds) {
+        this.objects = this.objects.filter(obj => !objectIds.includes(obj.id))
+        this.selected = this.selected.filter(id => this.objects.includes(id))
     }
 
     async addObject(obj) {
@@ -283,12 +289,11 @@ const Editor = observer(() => {
     console.log('selected', editorState.selected)
     useEffect(() => {
         const selected = editorState.selected.map(id => refs[id])
-        console.log(`updateTransformer`, selected)
+        console.log(`transformer.nodes`, selected)
 
         transformerRef.current.nodes(selected.map(ref => ref.current));
         transformerRef.current.getLayer().batchDraw();
-    })
-    console.log(editorState.dragActive)
+    }, [editorState.selected])
 
     return <div 
         onDrop={(ev) => {
@@ -391,22 +396,33 @@ const Editor = observer(() => {
                 ev.preventDefault()
                 editorState.setDragActive(false)
             }}
-            onKeyUp={(ev) => {
-                ev.preventDefault()
-                if (ev.nativeEvent.key == 'Backspace') {
-                    // delete current selection.
 
+            // You should use tabIndex attribute to be able to listen onKeyDown event on a div in React. Setting tabIndex="0" should fire your handler.
+            // LOL, HTML/DOM.
+            // https://stackoverflow.com/a/44434971
+            tabIndex={-1}
+            onKeyUp={(ev) => {
+                console.log(ev)
+                ev.preventDefault()
+                if (ev.key == 'Backspace') {
+                    // delete current selection.
+                    console.log('Del')
+                    editorState.delete(editorState.selected)
                 }
             }}
             style={{
                 border: `2px solid ${editorState.dragActive == true ? 'blue' : 'black'}`
             }}>
-            <Stage ref={stageRef} width={700} height={700} onClick={() => editorState.select([]) }>
+            <Stage ref={stageRef} width={700} height={700} 
+                onClick={() => editorState.select([])}>
                 <Layer onClick={() => {
                     editorState.select([])
                 }}>
-                    {/* <Rect x={0} y={0} width={700} height={700} fill="white">
-                    </Rect>                     */}
+                    {/* 
+                    White Background
+                    <Rect x={0} y={0} width={700} height={700} fill="white">
+                    </Rect>
+                    */}
                     
                     {objects}
 
