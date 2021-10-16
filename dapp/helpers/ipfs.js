@@ -37,5 +37,5 @@ export async function uploadToIpfs(bufferOrString) {
     const { cid } = await ipfs.add(bufferOrString)
     console.log(cid)
     const ipfsUri = `ipfs://${normaliseCID(cid)}`
-    return { ipfsUri, cid }
+    return { ipfsUri, _cid: cid, cid: normaliseCID(cid) }
 }

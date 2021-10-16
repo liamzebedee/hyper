@@ -49,7 +49,7 @@ async function getImageElement(url, crossOrigin) {
         if (urlObj.protocol === 'ipfs:') {
             const cid = urlObj.hostname
             console.log(cid)
-            const buf = await downloadFromIpfs(cid, 'binary')
+            // const buf = await downloadFromIpfs(cid, 'binary')
             img.src = `${IPFS_GATEWAY_BASE_URI}${cid}`
             img['data-ipfs'] = url
         } else {
@@ -167,6 +167,7 @@ const Editor = observer(() => {
     useEffect(async () => {
         const urlParams = new URLSearchParams(window.location.search);
         const cid = urlParams.get('cid');
+        const tokenId = urlParams.get('token');
         
         let content = {
             objects: [
@@ -189,6 +190,28 @@ const Editor = observer(() => {
         }
         if(cid) {
             content = await downloadFromIpfs(cid, 'json')
+        }
+        if(tokenId) {
+            const fallbackProvider = new ethers.providers.JsonRpcProvider('http://localhost:8545')
+
+            const hyper = require('../../../protocol')
+            const { HyperMedia } = hyper.getContracts({
+                network: 'hardhat',
+                signerOrProvider: fallbackProvider
+            })
+
+            const tokenURI = await HyperMedia.tokenURI(tokenId)
+            const buf = dataUriToBuffer(tokenURI)
+            const str = buf.toString()
+            console.log(tokenURI, str)
+            const data = JSON.parse(str)
+            console.log(data)
+
+            if(!data.source) throw new Error("invalid format")
+
+            const url = new URL(data.source)
+            if(url.protocol != 'ipfs:') throw new Error("invalid protocol")
+            content = await downloadFromIpfs(url.host, 'json')
         }
 
         console.log(content)
@@ -280,12 +303,13 @@ const Editor = observer(() => {
         const { ipfsUri: rasterImageIpfsUri, cid: rasterImageIpfsCid } = await uploadToIpfs(rasterImageBuf)
 
         console.log('file', file)
-        console.log('rasterImageIpfsCid', rasterImageIpfsCid)
-        
+        console.log('rasterImageIpfsUri', rasterImageIpfsUri)
+        console.log(`${IPFS_GATEWAY_BASE_URI}${rasterImageIpfsCid}`)
+
         const { cid: sourceCid } = await uploadToIpfs(JSON.stringify(file))
 
         console.log('exportCanvasAsHyper', children, objects);
-        console.log(`${IPFS_GATEWAY_BASE_URI}${normaliseCID(sourceCid)}`)
+        console.log(`${IPFS_GATEWAY_BASE_URI}${sourceCid}`)
 
         const hyper = require('../../../protocol')
         const { HyperMedia } = hyper.getContracts({
@@ -301,7 +325,7 @@ const Editor = observer(() => {
 
                     let url = new URL(obj.url)
                     if(url.protocol != 'ipfs:') return null
-                    let cid = url.pathname
+                    let cid = url.host
 
                     // Now query provenance of this media item.
                     const tokenId = await HyperMedia.cidToToken(cid)
@@ -315,16 +339,22 @@ const Editor = observer(() => {
 
         console.log('sources', sources)
 
+        console.log('HyperMedia', rasterImageIpfsCid,
+            sourceCid)
         const tx = await HyperMedia.create(
             sources,
             rasterImageIpfsCid,
             sourceCid
         )
-        await tx.wait(1)
+        const receipt = await tx.wait(1)
+
+        const tokenId = await HyperMedia.cidToToken(sourceCid)
+        console.log(receipt)
         console.log(tokenId)
 
 
-        window.open(`http://localhost:3001?cid=${normaliseCID(sourceCid)}`)
+        window.open(`http://localhost:3001?cid=${sourceCid}`)
+        window.open(`http://localhost:3001?token=${tokenId.toString()}`)
     }
 
     console.log('refs', refs)
