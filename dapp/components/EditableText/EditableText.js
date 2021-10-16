@@ -176,5 +176,6 @@ const EditableText = forwardRef((props, ref) => {
             {..._.omit(props, ['stageRef', 'transformerRef'])} />
     </>
 })
+EditableText.displayName = 'EditableText'
 
 export default EditableText
