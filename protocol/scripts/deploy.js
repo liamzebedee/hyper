@@ -24,7 +24,7 @@ async function deployContract({ contract, params, force = false, name = undefine
 
   if (deployments.targets[target]) {
     console.debug(gray(`Skipping ${target}, as it is already deployed`));
-    return hre.ethers.getContractAt(contract, deployments.contracts[target].address)
+    return hre.ethers.getContractAt(contract, deployments.targets[target].address)
   }
 
   console.debug(`Deploying ${green(target)}`);
@@ -32,7 +32,7 @@ async function deployContract({ contract, params, force = false, name = undefine
   const Template = await hre.ethers.getContractFactory(contract);
 
   const instance = await Template.deploy(...params);
-  const address = (await instance.deployed()).address;
+  const address = instance.address;
 
   console.debug(`Deployed ${green(target)} to ${address}`);
 
@@ -109,7 +109,7 @@ async function main() {
   const deploymentFilePath = join(__dirname, `../../deployments/${hre.network.name}.json`)
   if (process.env.FRESH_DEPLOY) {
     deployments = {
-      contracts: {}
+      targets: {}
     }
   } else {
     deployments = require(deploymentFilePath)
@@ -118,10 +118,12 @@ async function main() {
   // Deploy AddressResolver.
   // -----------------------
 
-  await deployContract({
+  const hyperMedia = await deployContract({
     contract: "HyperMedia",
     params: []
   });
+
+  await hyperMedia.create([], "bafybeibqcttzdeznkrtdn3byco4tvwqxt52wm2cftz2bgumr6muybz2tzi", "bafybeibqcttzdeznkrtdn3byco4tvwqxt52wm2cftz2bgumr6muybz2tzi")
 
 
   // Genesis.

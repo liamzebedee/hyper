@@ -7,6 +7,7 @@ The project comes with a sample contract, a test for that contract, a sample scr
 Try running some of the following tasks:
 
 ```shell
+FRESH_DEPLOY=1 npx hardhat run --network localhost scripts/deploy.js
 npx hardhat accounts
 npx hardhat compile
 npx hardhat clean

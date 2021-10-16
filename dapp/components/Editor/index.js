@@ -15,7 +15,7 @@ import EditableText from '../EditableText/EditableText'
 import styles from './styles.module.css'
 
 const web3Modal = new Web3Modal({
-    // network: "mainnet", // optional
+    network: "mainnet", // optional
     cacheProvider: true, // optional
     providerOptions: {} // required
 });
@@ -130,18 +130,21 @@ class EditorState {
 
 class Web3State {
     provider = null
+    signer = null
     ensName = null
 
     constructor(title) {
         makeObservable(this, {
             provider: observable,
             ensName: observable,
+            signer: observable,
             set: action
         })
     }
 
-    set(provider, ensName) {
+    set(provider, signer, ensName) {
         this.provider = provider
+        this.signer = signer
         this.ensName = ensName
     }
 };
@@ -272,20 +275,56 @@ const Editor = observer(() => {
         }
 
         // Export PNG to IPFS, for use in ERC721 metadata.
-        // const rasterImageUri = stageRef.current.toDataURL();
-        // const rasterImageBuf = dataUriToBuffer(rasterImageUri)
-        // const { ipfsUri: rasterImageIpfsUri, cid: rasterImageIpfsCid } = await uploadToIpfs(buf)
-        // const erc721Metadata = {
-        //     "image": "https://game.example/item-id-8u5h2m.png",
-        // }
+        const rasterImageUri = stageRef.current.toDataURL();
+        const rasterImageBuf = dataUriToBuffer(rasterImageUri)
+        const { ipfsUri: rasterImageIpfsUri, cid: rasterImageIpfsCid } = await uploadToIpfs(rasterImageBuf)
 
         console.log('file', file)
+        console.log('rasterImageIpfsCid', rasterImageIpfsCid)
         
-        const { cid } = await uploadToIpfs(JSON.stringify(file))
+        const { cid: sourceCid } = await uploadToIpfs(JSON.stringify(file))
 
         console.log('exportCanvasAsHyper', children, objects);
-        console.log(`${IPFS_GATEWAY_BASE_URI}${normaliseCID(cid)}`)
-        window.open(`http://localhost:3001?cid=${normaliseCID(cid)}`)
+        console.log(`${IPFS_GATEWAY_BASE_URI}${normaliseCID(sourceCid)}`)
+
+        const hyper = require('../../../protocol')
+        const { HyperMedia } = hyper.getContracts({
+            network: 'hardhat',
+            signerOrProvider: web3State.signer
+        })
+        
+        // Find all sources.
+        const sources = (await Promise.all(
+            objects
+                .map(async obj => {
+                    if(!obj.url) return null
+
+                    let url = new URL(obj.url)
+                    if(url.protocol != 'ipfs:') return null
+                    let cid = url.pathname
+
+                    // Now query provenance of this media item.
+                    const tokenId = await HyperMedia.cidToToken(cid)
+                    // If the token id is 0 (special case - unset), then there is no
+                    // ownership of this content.
+                    if(tokenId.isZero()) return null
+
+                    return tokenId
+                })
+        )).filter(x => x != null)
+
+        console.log('sources', sources)
+
+        const tx = await HyperMedia.create(
+            sources,
+            rasterImageIpfsCid,
+            sourceCid
+        )
+        await tx.wait(1)
+        console.log(tokenId)
+
+
+        window.open(`http://localhost:3001?cid=${normaliseCID(sourceCid)}`)
     }
 
     console.log('refs', refs)
@@ -354,21 +393,35 @@ const Editor = observer(() => {
     }, [editorState.selected])
 
     async function connectWallet() {
-        const rawProvider = await web3Modal.connect();
+        let rawProvider
+        if(process.env.NODE_ENV == 'production') {
+            rawProvider = await web3Modal.connect();
+        } else {
+            await window.ethereum.enable()
+            rawProvider = window.ethereum
+        }
+
         provider = new ethers.providers.Web3Provider(rawProvider)
         const signer = await provider.getSigner()
         const addy = await signer.getAddress()
         
+        let ensName
+        if (process.env.NODE_ENV == 'production') {
+            const ens = new ENS({ 
+                provider: cloudflareProvider,
+                ensAddress: getEnsAddress('1') 
+            })
+            let { name: ensName } = await ens.getName(addy)
+            console.log(addy, ensName)
 
-        const ens = new ENS({ provider, ensAddress: getEnsAddress('1') })
-        let { name: ensName } = await ens.getName(addy)
-        console.log(addy, ensName)
-
-        if (addy != (await ens.name(ensName).getAddress())) {
+            if (addy != (await ens.name(ensName).getAddress())) {
+                ensName = addy
+            }
+        } else {
             ensName = addy
         }
 
-        web3State.set(provider, ensName)
+        web3State.set(provider, signer, ensName)
     }
 
     return <div 
@@ -410,7 +463,7 @@ const Editor = observer(() => {
         </button>
 
         <button onClick={exportCanvas}>Export (.png)</button>
-        <button onClick={exportCanvasAsHyper}>Publish to IPFS</button>
+        <button onClick={exportCanvasAsHyper}>Publish</button>
 
         <div className={styles.canvas}
             onDragEnter={(ev) => {
