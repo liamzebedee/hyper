@@ -27,13 +27,16 @@ contract HyperMedia is Ownable, ERC721, ERC721Enumerable, ERC721URIStorage {
 
     // Tracks metadata of Hyper objects.
     mapping(uint256 => HyperMedia) public media;
+    mapping(string => uint256) public cidToToken;
 
     // The external URL base for the ERC721 metadata field, "external_uri".
     string public externalUrlBase;
 
     constructor() 
         ERC721("Hyper Media", "HYPER.0")
-    {}
+    {
+        _tokenIds.increment();
+    }
 
     function setExternalURLBase(string calldata _externalURLBase) public onlyOwner {
         // http://localhost:3001/?cid=bafybeiegtv4jzjk7qzjlbz43tbyxi5hvbyyv6emblnfys7kn7dbd4akli4
@@ -42,11 +45,14 @@ contract HyperMedia is Ownable, ERC721, ERC721Enumerable, ERC721URIStorage {
     
     function create(uint256[] calldata sources, string calldata imageCID, string calldata sourceCID) public returns (uint256) {
         address creator = msg.sender;
+
+        require(cidToToken[imageCID] == 0, "err_imageCID_uniq");
+        require(cidToToken[sourceCID] == 0, "err_sourceCID_uniq");
         
-        _tokenIds.increment();
         uint256 newItemId = _tokenIds.current();
         _mint(creator, newItemId);
-        
+        _tokenIds.increment();
+
         media[newItemId] = HyperMedia({
             creator: creator,
             numSources: sources.length,
@@ -54,11 +60,15 @@ contract HyperMedia is Ownable, ERC721, ERC721Enumerable, ERC721URIStorage {
             imageCID: imageCID,
             sourceCID: sourceCID
         });
+        cidToToken[imageCID] = newItemId;
+        cidToToken[sourceCID] = newItemId;
 
         return newItemId;
     }
 
     /*
+    https://docs.opensea.io/docs/metadata-standards
+    https://eips.ethereum.org/EIPS/eip-721
     {
         "name": "Hyper Object #0",
         "image": "ipfs://111111111",
@@ -67,7 +77,7 @@ contract HyperMedia is Ownable, ERC721, ERC721Enumerable, ERC721URIStorage {
     }
     */
     function tokenURI(uint256 tokenId) override(ERC721, ERC721URIStorage) public view returns (string memory output) {
-        HyperMedia memory object = media[tokenId];
+        HyperMedia storage object = media[tokenId];
 
         string memory json = Base64.encode(bytes(string(abi.encodePacked(
             '{"name": "Hyper Object #', tokenId.toString(), '", "image": "ipfs://', object.imageCID, '", "source":"ipfs://', object.sourceCID, '", "external_url": "', externalUrlBase, '/object/', tokenId.toString(), '" }'))));
