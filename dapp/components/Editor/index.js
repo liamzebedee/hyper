@@ -128,7 +128,23 @@ const Editor = observer(() => {
         const cid = urlParams.get('cid');
         
         let content = {
-            objects: []
+            objects: [
+                // Default white background.
+                /*
+                <Rect x={0} y={0} width={700} height={700} fill="white">
+                </Rect>
+                */
+                {
+                    type: 'Rect',
+                    attrs: {
+                        x: 0,
+                        y: 0,
+                        width: 700,
+                        height: 700,
+                        fill: "white"
+                    }
+                }
+            ]
         }
         if(cid) {
             content = await downloadFromIpfs(cid, 'json')
@@ -166,7 +182,8 @@ const Editor = observer(() => {
                 type: null
             }
             
-            const data = _.pick(node, ['attrs', 'colorKey'])
+            const KONVA_KEYS = ['attrs', 'colorKey']
+            const data = _.pick(node, KONVA_KEYS)
 
             // Determine obj.type.
             if(node.className == 'Image') {
@@ -182,14 +199,8 @@ const Editor = observer(() => {
                     // data-ipfs property, set above.
                     image.url = $image["data-ipfs"]
                 } else if ($image.src.startsWith('data')) {
-                    // extract image type
-                    // const urlObj = new URL(url)
-                    // new URL("data:image/jpeg;base64,/9j/4AAQSk")
-                    // pathname: "image/jpeg;base64,/9j/4AAQSk",
-                    // image.imageType = urlObj.pathname.split(';')[0]
-                    
-
-                    // upload to ipfs
+                    // Image was drag-n-dropped locally.
+                    // Now we upload it to IPFS.
                     const buf = dataUriToBuffer($image.src)
                     const { ipfsUri } = await uploadToIpfs(buf)
                     console.log(`uploaded submedia ${ipfsUri}`)
@@ -215,10 +226,20 @@ const Editor = observer(() => {
             return obj
         }))
 
+        // A .hyper file is an ERC721 metadata format. 
         const file = {
             version: '0.0.1',
+            image: "",
             objects
         }
+
+        // Export PNG to IPFS, for use in ERC721 metadata.
+        // const rasterImageUri = stageRef.current.toDataURL();
+        // const rasterImageBuf = dataUriToBuffer(rasterImageUri)
+        // const { ipfsUri: rasterImageIpfsUri, cid: rasterImageIpfsCid } = await uploadToIpfs(buf)
+        // const erc721Metadata = {
+        //     "image": "https://game.example/item-id-8u5h2m.png",
+        // }
 
         console.log('file', file)
         
@@ -234,7 +255,6 @@ const Editor = observer(() => {
     const transformerRef = useRef()
 
     const objects = editorState.objects.map((object) => {
-
         if (object.type === 'image') {
             const { img } = object
 
@@ -304,7 +324,7 @@ const Editor = observer(() => {
             ev.preventDefault()
         }}>
 
-        <h3>hyper editor</h3>
+        <h3>HYPER FABRICATOR</h3>
 
         <button onClick={() => {
             editorState.addObject({
@@ -327,7 +347,7 @@ const Editor = observer(() => {
         </button>
 
         <button onClick={exportCanvas}>Export (.png)</button>
-        <button onClick={exportCanvasAsHyper}>Export (.hyper)</button>
+        <button onClick={exportCanvasAsHyper}>Publish to IPFS</button>
 
         <div className={styles.canvas}
             onDragEnter={(ev) => {
@@ -417,13 +437,7 @@ const Editor = observer(() => {
                 onClick={() => editorState.select([])}>
                 <Layer onClick={() => {
                     editorState.select([])
-                }}>
-                    {/* 
-                    White Background
-                    <Rect x={0} y={0} width={700} height={700} fill="white">
-                    </Rect>
-                    */}
-                    
+                }}>                    
                     {objects}
 
                     <Transformer

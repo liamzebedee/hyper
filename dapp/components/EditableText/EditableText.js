@@ -33,7 +33,9 @@ const EditableText = forwardRef((props, ref) => {
             // reset scale, so only with is changing by transformer
             textNode.setAttrs({
                 width: textNode.width() * textNode.scaleX(),
+                height: textNode.height() * textNode.scaleY(),
                 scaleX: 1,
+                scaleY: 1
             });
         });
 

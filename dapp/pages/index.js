@@ -4,9 +4,13 @@ import styles from '../styles/Home.module.css'
 import { Editor } from '../components/Editor/dynamic'
 
 export default function Home() {
-  return (
+  return <>
+    <Head>
+      <title>HyperFab</title>
+    </Head>
+
     <div className={styles.container}>
       <Editor />
     </div>
-  )
+  </>
 }
