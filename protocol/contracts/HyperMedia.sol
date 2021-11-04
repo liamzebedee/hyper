@@ -9,9 +9,26 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "./libraries/Base64.sol";
 
+// library DynamicArrays {
+//     function push(uint256[] array) pure {
+        
+//     }
+
+//     // address[] memory array = new address[](markets.length);
+//     // uint count = 0;
+//     // for(uint i = 0; i < markets.length; i++) {
+//     // if(markets[i].enabled) array[count++] = markets[i]
+//     // }
+//     // // the neat hack
+//     // assembly {
+//     // mstore(array, count)
+//     // }
+//     // return array
+// }
 
 contract HyperMedia is Ownable, ERC721, ERC721Enumerable, ERC721URIStorage {
     using Strings for uint256;
+    using Strings for string;
     using Counters for Counters.Counter;
 
     struct HyperMedia {
@@ -42,13 +59,8 @@ contract HyperMedia is Ownable, ERC721, ERC721Enumerable, ERC721URIStorage {
         // http://localhost:3001/?cid=bafybeiegtv4jzjk7qzjlbz43tbyxi5hvbyyv6emblnfys7kn7dbd4akli4
         externalUrlBase = _externalURLBase;
     }
-    
-    function create(uint256[] calldata sources, string calldata imageCID, string calldata sourceCID) public returns (uint256) {
-        address creator = msg.sender;
 
-        require(cidToToken[imageCID] == 0, "err_imageCID_uniq");
-        require(cidToToken[sourceCID] == 0, "err_sourceCID_uniq");
-        
+    function _create(address creator, uint256[] memory sources, string memory imageCID, string memory sourceCID) internal returns (uint256) {
         uint256 newItemId = _tokenIds.current();
         _mint(creator, newItemId);
         _tokenIds.increment();
@@ -60,10 +72,55 @@ contract HyperMedia is Ownable, ERC721, ERC721Enumerable, ERC721URIStorage {
             imageCID: imageCID,
             sourceCID: sourceCID
         });
+
         cidToToken[imageCID] = newItemId;
-        cidToToken[sourceCID] = newItemId;
+        if(keccak256(bytes(imageCID)) != keccak256(bytes(sourceCID))) {
+            cidToToken[sourceCID] = newItemId;
+        }
 
         return newItemId;
+    }
+    
+    function create(uint256[] calldata existingSources, string[] calldata newSources, string calldata imageCID, string calldata sourceCID) public returns (uint256) {
+        // Locals.
+        uint256 i;
+        uint256 newItemId;
+
+        require(cidToToken[imageCID] == 0, "err_imageCID_uniq");
+        require(cidToToken[sourceCID] == 0, "err_sourceCID_uniq");
+
+        uint256[] memory sources = new uint256[](existingSources.length + newSources.length);
+        for(i = 0; i < existingSources.length; i++) {
+            sources[i] = existingSources[i];
+        }
+        
+        // Create HyperMedia items for each new source.
+        // eg. new assets, symbols, imagery
+        // These don't have any sources, they stand on their own.
+        uint[] memory emptySources;
+
+        for(i = 0; i < newSources.length; i++) {
+            newItemId = _create(
+                msg.sender,
+                emptySources,
+                newSources[i],
+                newSources[i]
+            );
+            sources[existingSources.length + i] = newItemId;
+        }
+
+        newItemId = _create(
+            msg.sender,
+            sources,
+            imageCID,
+            sourceCID
+        );
+
+        return newItemId;
+    }
+
+    function getSources(uint256 item) public view returns (uint[] memory) {
+        return media[item].sources;
     }
 
     /*
@@ -80,7 +137,7 @@ contract HyperMedia is Ownable, ERC721, ERC721Enumerable, ERC721URIStorage {
         HyperMedia storage object = media[tokenId];
 
         string memory json = Base64.encode(bytes(string(abi.encodePacked(
-            '{"name": "Hyper Object #', tokenId.toString(), '", "image": "ipfs://', object.imageCID, '", "source":"ipfs://', object.sourceCID, '", "external_url": "', externalUrlBase, '/object/', tokenId.toString(), '" }'))));
+            '{"name": "Hyper Object #', tokenId.toString(), '", "image": "ipfs:', object.imageCID, '", "source":"ipfs:', object.sourceCID, '", "external_url": "', externalUrlBase, '/object/', tokenId.toString(), '" }'))));
         output = string(abi.encodePacked('data:application/json;base64,', json));
 
         return output;

@@ -1,14 +1,13 @@
-import React, { createRef, useEffect, useReducer, useRef, useState } from 'react';
+import React, { createRef, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 const { Layer, Star, Text, Image, Rect, Transformer } = require('react-konva');
 import { makeObservable, observable, action, computed } from "mobx"
 import { observer } from 'mobx-react-lite'
-import cuid from 'cuid';
 import _, { create } from 'lodash'
 const dataUriToBuffer = require('data-uri-to-buffer');
 const ethers = require('ethers')
 import ENS, { getEnsAddress } from '@ensdomains/ensjs'
 
-import { downloadURI, normaliseCID, downloadFromIpfs, uploadToIpfs } from '../../helpers'
+import { downloadURI, normaliseCID, downloadFromIpfs, uploadToIpfs, getCIDFromIPFSUrl } from '../../helpers'
 import { IPFS_GATEWAY_BASE_URI, IPFS_NODE_URI } from '../../config';
 import { Stage } from './Stage'
 import EditableText from '../EditableText/EditableText'
@@ -20,134 +19,10 @@ const web3Modal = new Web3Modal({
     providerOptions: {} // required
 });
 
-let provider
-let ens
+const NETWORK = 'kovan'
 
-let images = {}
-async function getImageElement(url, crossOrigin) {
-    if (!url) return;
-
-    var img = document.createElement('img');
-
-    return new Promise(async (resolve, reject) => {
-        function onload() {
-            resolve(img)
-        }
-
-        function onerror(err) {
-            reject(err)
-        }
-
-        img.addEventListener('load', onload);
-        img.addEventListener('error', onerror);
-        if (crossOrigin) {
-            img.crossOrigin = crossOrigin
-        }
-
-        const urlObj = new URL(url)
-
-        if (urlObj.protocol === 'ipfs:') {
-            const cid = urlObj.hostname
-            console.log(cid)
-            // const buf = await downloadFromIpfs(cid, 'binary')
-            img.src = `${IPFS_GATEWAY_BASE_URI}${cid}`
-            img['data-ipfs'] = url
-        } else {
-            img.src = url;
-        }
-        console.log(img)
-        // return function cleanup() {
-        //     img.removeEventListener('load', onload);
-        //     img.removeEventListener('error', onerror);
-        //     setState(defaultState);
-        // };
-    })
-}
-
-
-class EditorState {
-    objects = []
-    selected = []
-
-    dragActive = false
-
-    constructor(title) {
-        makeObservable(this, {
-            objects: observable,
-            initialize: action,
-            selected: observable,
-            select: action,
-            dragActive: observable,
-            setDragActive: action,
-            addObject: action,
-            delete: action
-        })
-    }
-
-    async initialize({ objects }) {
-        this.objects = await Promise.all(objects.map(obj => this.loadObject(obj)))
-    }
-
-    async loadObject(obj) {
-        let editorObject = {
-            ...obj
-        }
-
-        if (obj.type == 'image') {
-            editorObject = await this.loadImageObject(obj)
-        }
-
-        editorObject.id = cuid()
-        return editorObject
-    }
-
-    async loadImageObject(obj) {
-        const img = await getImageElement(obj.url, true)
-        return {
-            ...obj,
-            img
-        }
-    }
-
-    select(objects) {
-        this.selected = objects
-    }
-
-    setDragActive(v) {
-        this.dragActive = v
-    }
-    
-    delete(objectIds) {
-        this.objects = this.objects.filter(obj => !objectIds.includes(obj.id))
-        this.selected = this.selected.filter(id => this.objects.includes(id))
-    }
-
-    async addObject(obj) {
-        let editorObject = await this.loadObject(obj)
-        this.objects.push(editorObject)
-    }
-};
-
-class Web3State {
-    provider = null
-    signer = null
-    ensName = null
-
-    constructor(title) {
-        makeObservable(this, {
-            provider: observable,
-            ensName: observable,
-            signer: observable,
-            set: action
-        })
-    }
-
-    set(provider, signer, ensName) {
-        this.provider = provider
-        this.signer = signer
-        this.ensName = ensName
-    }
-};
+const { images, getImageElement } = require('./images')
+const { EditorState, Web3State } = require('./state')
 
 let refs = {}
 
@@ -157,12 +32,216 @@ import Web3Modal from "web3modal";
 const providerOptions = {};
 
 
+const hyper = require('../../../protocol')
+class HyperLibrary {
+    constructor() {}
+    static create(provider, network) {
+        let self = new HyperLibrary()
+        self.contracts = hyper.getContracts({
+            network: NETWORK,
+            signerOrProvider: provider
+        })
+        return self
+    }
 
+    async get(tokenId, fetchSources=true) {
+        const { HyperMedia } = this.contracts
+
+        const tokenURI = await HyperMedia.tokenURI(tokenId)
+        console.log(tokenId, tokenURI)
+        const [, creator] = await HyperMedia.media(tokenId)
+        const sourcesIDs = await HyperMedia.getSources(tokenId)
+        let sources = []
+        if (fetchSources) {
+            sources = await Promise.all(sourcesIDs.map(id => {
+                return this.get(id, false)
+            }))
+        }
+
+        const erc721MetadataURI = dataUriToBuffer(tokenURI).toString()
+        const erc721Metadata = JSON.parse(erc721MetadataURI)
+
+        console.log('metadata', erc721Metadata)
+
+        if (!erc721Metadata.source) throw new Error("invalid format")
+
+        const sourceUrl = new URL(erc721Metadata.source)
+        if (sourceUrl.protocol != 'ipfs:') throw new Error("invalid protocol")
+        const sourceCID = getCIDFromIPFSUrl(erc721Metadata.source)
+        console.log(sourceCID)
+        let source
+        try {
+            source = await downloadFromIpfs(getCIDFromIPFSUrl(erc721Metadata.source), 'json')
+        } catch(ex) {
+            if(fetchSources) throw ex
+        }
+        
+        return {
+            tokenId,
+            source,
+            creator,
+            erc721Metadata,
+            sources,
+        }
+    }
+}
+
+async function exportCanvasAsHyper(forkedObjectId, stageRef, web3State) {
+    const stage = stageRef.current;
+    const layer = stage.getChildren()[0]
+    const allChildren = layer.getChildren()
+
+    const acceptedTypes = ['Image', 'Rect', 'Text']
+
+    const children = allChildren
+        .filter(child => acceptedTypes.includes(child.className));
+
+    // Now convert each node.
+    const objects = await Promise.all(children.map(async node => {
+        let obj = {
+            type: null
+        }
+
+        const KONVA_KEYS = ['attrs', 'colorKey']
+        const data = _.pick(node, KONVA_KEYS)
+
+        // Determine obj.type.
+        if (node.className == 'Image') {
+            let image = {
+                type: 'image',
+                url: null,
+            }
+            // Error: $image is undefined ??
+            let $image = node.getImage()
+            if ($image["data-ipfs"]) {
+                // If the content is originating from IPFS, we don't re-upload it.
+                // This is a bit of a hack, as we assume that the <img> element will have the 
+                // data-ipfs property, set above.
+                image.url = $image["data-ipfs"]
+            } else if ($image.src.startsWith('data')) {
+                // Image was drag-n-dropped locally.
+                // Now we upload it to IPFS.
+                const buf = dataUriToBuffer($image.src)
+                const { ipfsUri } = await uploadToIpfs(buf)
+                console.log(`uploaded submedia ${ipfsUri}`)
+                image.url = ipfsUri
+            }
+
+            obj = {
+                ...data,
+                ...image
+            }
+
+            delete obj.attrs.image
+
+        } else {
+            const type = node.className
+
+            obj = {
+                ...data,
+                type,
+            }
+        }
+
+        return obj
+    }))
+
+    // A .hyper file is an ERC721 metadata format. 
+    const file = {
+        version: '0.0.1',
+        image: "",
+        objects
+    }
+
+    // Export PNG to IPFS, for use in ERC721 metadata.
+    const rasterImageUri = stageRef.current.toDataURL();
+    const rasterImageBuf = dataUriToBuffer(rasterImageUri)
+    const { ipfsUri: rasterImageIpfsUri, cid: rasterImageIpfsCid } = await uploadToIpfs(rasterImageBuf)
+
+    console.log('file', file)
+    console.log('rasterImageIpfsUri', rasterImageIpfsUri)
+    console.log(`${IPFS_GATEWAY_BASE_URI}${rasterImageIpfsCid}`)
+
+    const { cid: sourceCid } = await uploadToIpfs(JSON.stringify(file))
+
+    console.log('exportCanvasAsHyper', children, objects);
+    console.log(`${IPFS_GATEWAY_BASE_URI}${sourceCid}`)
+
+    const hyper = require('../../../protocol')
+    const { HyperMedia } = hyper.getContracts({
+        network: NETWORK,
+        signerOrProvider: web3State.signer
+    })
+
+    // Find all sources.
+    console.log('objects', objects)
+    const existingSources = []
+    const newSources = []
+    
+    // By convention, the first of the existing sources is the 
+    // original forked canvas.
+    if (forkedObjectId) existingSources.push(forkedObjectId)
+
+    await Promise.all(
+        objects
+            .map(async obj => {
+                if (!obj.url) return null
+                const url = new URL(obj.url)
+                if (url.protocol != 'ipfs:') return null
+
+                let cid = getCIDFromIPFSUrl(obj.url)
+
+                // Now query provenance of this media item.
+                const tokenId = await HyperMedia.cidToToken(cid)
+                // If the token id is 0 (special case - unset), then there is no
+                // ownership of this content.
+                if (tokenId.isZero()) {
+                    console.log(cid)
+                    newSources.push(cid)
+                } else {
+                    existingSources.push(tokenId.toString())
+                }
+            })
+    )
+
+    console.log('existingSources', existingSources)
+    console.log('newSources', newSources)
+
+    console.log('HyperMedia', rasterImageIpfsCid, sourceCid)
+    
+    console.log(
+        `HyperMedia.create`,
+        existingSources,
+        newSources,
+        rasterImageIpfsCid,
+        sourceCid
+    )
+
+    const tx = await HyperMedia.create(
+        existingSources,
+        newSources,
+        rasterImageIpfsCid,
+        sourceCid
+    )
+    const receipt = await tx.wait(1)
+
+    const tokenId = await HyperMedia.cidToToken(sourceCid)
+    console.log(receipt)
+    console.log(tokenId)
+
+
+    window.open(`http://localhost:3001?cid=${sourceCid}`)
+    window.open(`http://localhost:3001?token=${tokenId.toString()}`)
+}
 
 const Editor = observer(() => {
     const [editorState] = useState(() => new EditorState())
     const [web3State] = useState(() => new Web3State())
 
+    const [objectDetails, setObjectDetails] = useState({
+        author: null,
+        createdAt: null
+    })
 
     useEffect(async () => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -188,30 +267,23 @@ const Editor = observer(() => {
                 }
             ]
         }
+
         if(cid) {
+            // DEV-ONLY
             content = await downloadFromIpfs(cid, 'json')
         }
         if(tokenId) {
-            const fallbackProvider = new ethers.providers.JsonRpcProvider('http://localhost:8545')
+            let fallbackProvider
+            if (NETWORK == 'hardhat') {
+                fallbackProvider = new ethers.providers.JsonRpcProvider('http://localhost:8545')
+            } else {
+                fallbackProvider = new ethers.providers.JsonRpcProvider('https://kovan.infura.io/v3/feb228261711453d992038ab7aebefe3')
+            }
 
-            const hyper = require('../../../protocol')
-            const { HyperMedia } = hyper.getContracts({
-                network: 'hardhat',
-                signerOrProvider: fallbackProvider
-            })
-
-            const tokenURI = await HyperMedia.tokenURI(tokenId)
-            const buf = dataUriToBuffer(tokenURI)
-            const str = buf.toString()
-            console.log(tokenURI, str)
-            const data = JSON.parse(str)
-            console.log(data)
-
-            if(!data.source) throw new Error("invalid format")
-
-            const url = new URL(data.source)
-            if(url.protocol != 'ipfs:') throw new Error("invalid protocol")
-            content = await downloadFromIpfs(url.host, 'json')
+            let hyperLibrary = await HyperLibrary.create(fallbackProvider, 'kovan')
+            const object = await hyperLibrary.get(tokenId)
+            setObjectDetails(object)
+            content = object.source
         }
 
         console.log(content)
@@ -228,134 +300,7 @@ const Editor = observer(() => {
         console.log('exportCanvas', uri);
 
         downloadURI(uri, 'meme.jpg')
-    }
-
-    async function exportCanvasAsHyper() {
-        const stage = stageRef.current;
-        const layer = stage.getChildren()[0]
-        const allChildren = layer.getChildren()
-
-        const acceptedTypes = ['Image', 'Rect', 'Text']
-
-        const children = allChildren
-            .filter(child => acceptedTypes.includes(child.className));
-
-        // Now convert each node.
-        const objects = await Promise.all(children.map(async node => {
-            let obj = {
-                type: null
-            }
-            
-            const KONVA_KEYS = ['attrs', 'colorKey']
-            const data = _.pick(node, KONVA_KEYS)
-
-            // Determine obj.type.
-            if(node.className == 'Image') {
-                let image = {
-                    type: 'image',
-                    url: null,
-                }
-                const $image = node.attrs.image
-                console.log($image)
-                if ($image["data-ipfs"]) {
-                    // If the content is originating from IPFS, we don't re-upload it.
-                    // This is a bit of a hack, as we assume that the <img> element will have the 
-                    // data-ipfs property, set above.
-                    image.url = $image["data-ipfs"]
-                } else if ($image.src.startsWith('data')) {
-                    // Image was drag-n-dropped locally.
-                    // Now we upload it to IPFS.
-                    const buf = dataUriToBuffer($image.src)
-                    const { ipfsUri } = await uploadToIpfs(buf)
-                    console.log(`uploaded submedia ${ipfsUri}`)
-                    image.url = ipfsUri
-                }
-
-                obj = {
-                    ...data,
-                    ...image
-                }
-
-                delete obj.attrs.image
-                
-            } else {
-                const type = node.className
-
-                obj = {
-                    ...data,
-                    type,
-                }
-            }
-
-            return obj
-        }))
-
-        // A .hyper file is an ERC721 metadata format. 
-        const file = {
-            version: '0.0.1',
-            image: "",
-            objects
-        }
-
-        // Export PNG to IPFS, for use in ERC721 metadata.
-        const rasterImageUri = stageRef.current.toDataURL();
-        const rasterImageBuf = dataUriToBuffer(rasterImageUri)
-        const { ipfsUri: rasterImageIpfsUri, cid: rasterImageIpfsCid } = await uploadToIpfs(rasterImageBuf)
-
-        console.log('file', file)
-        console.log('rasterImageIpfsUri', rasterImageIpfsUri)
-        console.log(`${IPFS_GATEWAY_BASE_URI}${rasterImageIpfsCid}`)
-
-        const { cid: sourceCid } = await uploadToIpfs(JSON.stringify(file))
-
-        console.log('exportCanvasAsHyper', children, objects);
-        console.log(`${IPFS_GATEWAY_BASE_URI}${sourceCid}`)
-
-        const hyper = require('../../../protocol')
-        const { HyperMedia } = hyper.getContracts({
-            network: 'hardhat',
-            signerOrProvider: web3State.signer
-        })
-        
-        // Find all sources.
-        const sources = (await Promise.all(
-            objects
-                .map(async obj => {
-                    if(!obj.url) return null
-
-                    let url = new URL(obj.url)
-                    if(url.protocol != 'ipfs:') return null
-                    let cid = url.host
-
-                    // Now query provenance of this media item.
-                    const tokenId = await HyperMedia.cidToToken(cid)
-                    // If the token id is 0 (special case - unset), then there is no
-                    // ownership of this content.
-                    if(tokenId.isZero()) return null
-
-                    return tokenId
-                })
-        )).filter(x => x != null)
-
-        console.log('sources', sources)
-
-        console.log('HyperMedia', rasterImageIpfsCid,
-            sourceCid)
-        const tx = await HyperMedia.create(
-            sources,
-            rasterImageIpfsCid,
-            sourceCid
-        )
-        const receipt = await tx.wait(1)
-
-        const tokenId = await HyperMedia.cidToToken(sourceCid)
-        console.log(receipt)
-        console.log(tokenId)
-
-
-        window.open(`http://localhost:3001?cid=${sourceCid}`)
-        window.open(`http://localhost:3001?token=${tokenId.toString()}`)
-    }
+    }    
 
     console.log('refs', refs)
 
@@ -428,10 +373,11 @@ const Editor = observer(() => {
             rawProvider = await web3Modal.connect();
         } else {
             await window.ethereum.enable()
+            // const accounts = await window.ethereum.send('eth_requestAccounts');
             rawProvider = window.ethereum
         }
 
-        provider = new ethers.providers.Web3Provider(rawProvider)
+        const provider = new ethers.providers.Web3Provider(rawProvider)
         const signer = await provider.getSigner()
         const addy = await signer.getAddress()
         
@@ -472,28 +418,38 @@ const Editor = observer(() => {
         }
         </p>
 
-        <button onClick={() => {
-            editorState.addObject({
-                type: 'Text',
-                attrs: {
-                    x: 50,
-                    y: 50,
-                    fontSize: 20,
-                    width: 200,
-                    fontFamily: 'sans-serif',
-                    text: 'LOL WUT'
-                }
-            })
-        }}>
-            <img width={64} height={64} src="/icons/text.svg"/>
-        </button>
-        
-        <button>
-            <img width={64} height={64} src="/icons/image.svg" />
-        </button>
+        <div>
 
-        <button onClick={exportCanvas}>Export (.png)</button>
-        <button onClick={exportCanvasAsHyper}>Publish</button>
+            <button onClick={() => {
+                editorState.addObject({
+                    type: 'Text',
+                    attrs: {
+                        x: 50,
+                        y: 50,
+                        fontSize: 20,
+                        width: 200,
+                        fontFamily: 'sans-serif',
+                        text: 'LOL WUT'
+                    }
+                })
+            }}>
+                <img width={64} height={64} src="/icons/text.svg"/>
+            </button>
+            
+            <button>
+                <img width={64} height={64} src="/icons/image.svg" />
+            </button>
+
+            <button onClick={exportCanvas}>Export (.png)</button>
+            <button onClick={() => exportCanvasAsHyper(objectDetails && objectDetails.tokenId, stageRef, web3State)}>Publish</button>
+        </div>
+        
+        <div>
+            {objectDetails.tokenId
+                ? <MetadataInfo objectDetails={objectDetails}/> 
+                : null
+            }
+        </div>
 
         <div className={styles.canvas}
             onDragEnter={(ev) => {
@@ -602,6 +558,32 @@ const Editor = observer(() => {
         </div>
     </div>
 })
+
+const MetadataInfo = ({ objectDetails }) => {
+    console.log(objectDetails)
+    const { creator, tokenId, sources } = objectDetails
+    
+    let remixDetails
+    if(sources.length) {
+        let og = sources[0]
+        let tokenId = og.tokenId.toString()
+
+        const cid = getCIDFromIPFSUrl(og.erc721Metadata.image)
+        console.log(cid)
+        let src = `${IPFS_GATEWAY_BASE_URI}${cid}`
+
+        remixDetails = <>
+            <p>remix of <a href={`/?token=${tokenId}`}>#{tokenId}</a> by {og.creator}</p>
+            <img src={src} width={64} height={64}/>
+        </>
+    }
+
+    return <div>
+        <p>created by {creator}</p>
+        {remixDetails}
+
+    </div>
+}
 
 
 export default Editor

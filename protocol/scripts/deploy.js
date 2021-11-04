@@ -123,7 +123,7 @@ async function main() {
     params: []
   });
 
-  await hyperMedia.create([], "bafybeibqcttzdeznkrtdn3byco4tvwqxt52wm2cftz2bgumr6muybz2tzi", "bafybeibqcttzdeznkrtdn3byco4tvwqxt52wm2cftz2bgumr6muybz2tzi")
+  await hyperMedia.create([], [], "bafybeibqcttzdeznkrtdn3byco4tvwqxt52wm2cftz2bgumr6muybz2tzi", "bafybeibqcttzdeznkrtdn3byco4tvwqxt52wm2cftz2bgumr6muybz2tzi")
 
 
   // Genesis.
